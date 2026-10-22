@@ -1,0 +1,210 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Users, 
+  GraduationCap,
+  AlertTriangle,
+  BookOpen
+} from 'lucide-react';
+import KpiCard from '../components/common/KpiCard';
+import { LoadingState, ErrorState, EmptyState } from '../components/common/States';
+import AcademicRiskDistributionChart from '../components/charts/AcademicRiskDistributionChart';
+import DepartmentPerformanceChart from '../components/charts/DepartmentPerformanceChart';
+import CourseAcademicChart from '../components/charts/CourseAcademicChart';
+import AcademicPerformanceTable from '../components/tables/AcademicPerformanceTable';
+import { 
+  getDepartments,
+  getAcademicOverview,
+  getAcademicStudents,
+  getCoursesPerformance
+} from '../services/api';
+import type { 
+  Department,
+  AcademicOverview,
+  Student,
+  Course
+} from '../types/api';
+
+const AcademicIntelligence: React.FC = () => {
+  // Filters
+  const [departmentId, setDepartmentId] = useState<number | ''>('');
+  
+  // Data States
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  
+  const [overview, setOverview] = useState<AcademicOverview | null>(null);
+
+  // Pagination & Data states for Tables
+  const [studentsPage, setStudentsPage] = useState(1);
+  const [studentsData, setStudentsData] = useState<{items: Student[], total: number}>({items: [], total: 0});
+  
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const deps = await getDepartments();
+        setDepartments(deps);
+        const ov = await getAcademicOverview();
+        setOverview(ov);
+      } catch (err: any) {
+        setError(err.message || 'Failed to load initial data');
+      }
+    };
+    fetchInitialData();
+  }, []);
+
+  useEffect(() => {
+    const fetchCourses = async () => {
+      try {
+        const cParams: any = { page: 1, page_size: 10 };
+        if (departmentId !== '') cParams.department_id = departmentId;
+        const cData = await getCoursesPerformance(cParams);
+        setCourses(cData.items);
+      } catch (err) {
+        console.error("Failed to load courses for chart");
+      }
+    };
+    fetchCourses();
+  }, [departmentId]);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params: any = { page: studentsPage, page_size: 10 };
+        if (departmentId !== '') params.department_id = departmentId;
+
+        const studentsRes = await getAcademicStudents(params);
+        setStudentsData({ items: studentsRes.items, total: studentsRes.total });
+      } catch (err: any) {
+        setError(err.message || 'Failed to load academic data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [departmentId, studentsPage]);
+
+  const handleResetFilters = () => {
+    setDepartmentId('');
+    setStudentsPage(1);
+  };
+
+  if (loading && !studentsData.items.length && !overview) {
+    return <LoadingState message="Loading Academic Intelligence..." />;
+  }
+
+  if (error && !studentsData.items.length && !overview) {
+    return <ErrorState message={error} onRetry={handleResetFilters} />;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Academic Intelligence</h1>
+          <p className="text-slate-500 mt-1">Academic performance across departments, courses, batches, sections and students.</p>
+        </div>
+      </div>
+
+      {/* Filter Bar */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-4 items-end">
+        <div className="flex-1 w-full">
+          <label className="block text-sm font-medium text-slate-700 mb-1">Department</label>
+          <select
+            value={departmentId}
+            onChange={(e) => {
+              setDepartmentId(e.target.value === '' ? '' : Number(e.target.value));
+              setStudentsPage(1);
+            }}
+            className="w-full rounded-lg border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm"
+          >
+            <option value="">All Departments</option>
+            {departments.map((d) => (
+              <option key={d.department_id} value={d.department_id}>{d.department_name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-none">
+          <button
+            onClick={handleResetFilters}
+            className="w-full sm:w-auto px-4 py-2 border border-slate-300 shadow-sm text-sm font-medium rounded-lg text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 transition-colors"
+          >
+            Reset Filters
+          </button>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      {overview && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <KpiCard
+            title="Average Academic %"
+            value={`${overview.average_academic.toFixed(1)}%`}
+            icon={GraduationCap}
+          />
+          <KpiCard
+            title="Academic Concern Count"
+            value={overview.students_below_50.toLocaleString()}
+            icon={AlertTriangle}
+          />
+          <KpiCard
+            title="Total Students"
+            value={overview.total_students.toLocaleString()}
+            icon={Users}
+          />
+          <KpiCard
+            title="Courses Analyzed"
+            value={overview.total_courses_analyzed.toLocaleString()}
+            icon={BookOpen}
+          />
+        </div>
+      )}
+
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 h-[450px]">
+          {overview ? (
+            <AcademicRiskDistributionChart 
+              totalStudents={overview.total_students} 
+              studentsBelow50={overview.students_below_50} 
+            />
+          ) : (
+             <EmptyState message="No academic data available." />
+          )}
+        </div>
+        <div className="lg:col-span-2 h-[450px]">
+          <DepartmentPerformanceChart />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6">
+        <div className="h-[450px]">
+          {courses.length > 0 ? (
+            <CourseAcademicChart data={courses} />
+          ) : (
+            <EmptyState message="No course data available." />
+          )}
+        </div>
+      </div>
+
+      {/* Table Section */}
+      <div className="h-[500px]">
+        <AcademicPerformanceTable 
+          data={studentsData.items} 
+          page={studentsPage} 
+          pageSize={10} 
+          total={studentsData.total} 
+          onPageChange={setStudentsPage} 
+        />
+      </div>
+
+    </div>
+  );
+};
+
+export default AcademicIntelligence;
